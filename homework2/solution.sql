@@ -21,7 +21,7 @@ FROM genres
 INNER JOIN genreid_counts
 ON genres.genreid = genreid_counts.genreid;
 
---SELECT * FROM query1;
+-- SELECT * FROM query1;
 
 
 
@@ -32,35 +32,28 @@ in a table called “query2” which has two attributes: “name” attribute is
 and “rating” attribute is a list of average rating per genre.
 */
 
--- get average rating and movieid attributes
-DROP TABLE IF EXISTS rating_avgs CASCADE;
-SELECT movieid, avg(rating)
-INTO TEMP rating_avgs
-FROM ratings
-GROUP BY movieid;
-
--- join with hasagenre to get genreid and movies with avg ratings
-DROP TABLE IF EXISTS rating_w_genreid CASCADE;
-SELECT hasagenre.genreid, rating_avgs.avg
-INTO TEMP rating_w_genreid
+-- join genres with ratings
+DROP TABLE IF EXISTS all_ratings CASCADE;
+SELECT hasagenre.genreid, hasagenre.movieid, ratings.rating
+INTO TEMP all_ratings
 FROM hasagenre
-    INNER JOIN rating_avgs
-    ON rating_avgs.movieid = hasagenre.movieid;
+INNER JOIN ratings ON ratings.movieid = hasagenre.movieid
+ORDER BY hasagenre.genreid;
 
--- get average of all movies with the same genre
-DROP TABLE IF EXISTS genre_avgs CASCADE;
-SELECT genreid, avg(avg)
-INTO TEMP genre_avgs
-FROM rating_w_genreid
-GROUP BY genreid;
+-- sum ratings by genreid
+DROP TABLE IF EXISTS genre_rating_avg CASCADE;
+SELECT all_ratings.genreid, avg(all_ratings.rating)
+INTO TEMP genre_rating_avg
+FROM all_ratings
+GROUP BY all_ratings.genreid;
 
--- join genreid average rating to get genre name
+-- join to get genre name
 DROP TABLE IF EXISTS query2 CASCADE;
-CREATE TABLE query2 AS
-SELECT genres.name, genre_avgs.avg
+CREATE TABLE query2 (name, rating) AS
+SELECT genres.name, genre_rating_avg.avg
 FROM genres
-    INNER JOIN genre_avgs
-    ON genres.genreid = genre_avgs.genreid;
+    INNER JOIN genre_rating_avg
+    ON genres.genreid = genre_rating_avg.genreid;
 
 -- SELECT * FROM query2;
 
@@ -104,7 +97,7 @@ and “title” is a list of movie titles.
 -- get genreid for comedy movies and get all movieids with comedy genre id
 DROP TABLE IF EXISTS comedy_movieids CASCADE;
 SELECT hasagenre.movieid, hasagenre.genreid
-INTO comedy_movieids
+INTO TEMP comedy_movieids
 FROM hasagenre
 WHERE hasagenre.genreid =
 (
@@ -133,6 +126,14 @@ saved in a table called “query5” which has two attributes: “title” is a 
 and “average” is a list of the average rating per movie.
 */
 
+-- get average rating and movieid attributes
+
+DROP TABLE IF EXISTS rating_avgs CASCADE;
+SELECT movieid,
+       avg(rating) INTO TEMP rating_avgs
+FROM ratings
+GROUP BY movieid;
+
 -- get movie title from movieid
 DROP TABLE IF EXISTS query5 CASCADE;
 CREATE TABLE query5 (title, average) AS
@@ -141,7 +142,7 @@ FROM movies
     INNER JOIN rating_avgs
     ON rating_avgs.movieid = movies.movieid;
 
--- SELECT * FROM query5 WHERE title = 'Where the Heart Is (2000)';
+ -- SELECT * FROM query5 WHERE title = 'Where the Heart Is (2000)';
 
 
 /************************ QUERY 6 *************************/
@@ -152,10 +153,9 @@ should be saved in a table called “query6” which has one attribute: “avera
 
 DROP TABLE IF EXISTS query6 CASCADE;
 CREATE TABLE query6 (average) AS
-SELECT avg(query5.average)
-FROM query5
-    INNER JOIN query4
-    ON query4.title = query5.title;
+SELECT query2.rating
+FROM query2
+WHERE query2.name = 'Comedy';
 
 -- SELECT * FROM query6;
 
@@ -167,27 +167,32 @@ is both “Comedy” and “Romance”. Your query result should be saved in a t
 “query7” which has one attribute: “average”.
 */
 
--- get movieids of comedy and romance movies
-DROP TABLE IF EXISTS comedy_romance_movieids CASCADE;
-SELECT hasagenre.movieid, hasagenre.genreid
-INTO comedy_romance_movieids
+DROP TABLE IF EXISTS romance_movieids;
+SELECT hasagenre.movieid,
+       hasagenre.genreid INTO TEMP romance_movieids
 FROM hasagenre
-WHERE hasagenre.genreid IN
-    (
-        SELECT genres.genreid
-        FROM genres
-        WHERE name IN ('Comedy', 'Romance')
-    );
+WHERE hasagenre.genreid =
+        ( SELECT genres.genreid
+         FROM genres
+         WHERE name = 'Romance' );
+
+DROP TABLE IF EXISTS romance_and_comedy_movieids;
+SELECT movieid
+INTO TEMP romance_and_comedy_movieids
+FROM romance_movieids
+INTERSECT
+SELECT movieid
+FROM comedy_movieids;
 
 -- get average rating from all movies in comedy_romance_movieids table
 DROP TABLE IF EXISTS query7 CASCADE;
 CREATE TABLE query7 (average) AS
-SELECT avg(rating_avgs.avg)
-FROM rating_avgs
-    INNER JOIN comedy_romance_movieids
-    ON rating_avgs.movieid = comedy_romance_movieids.movieid;
+SELECT avg(rating)
+FROM ratings
+    INNER JOIN romance_and_comedy_movieids
+    ON ratings.movieid = romance_and_comedy_movieids.movieid;
 
--- SELECT * FROM query7;
+SELECT * FROM query7;
 
 
 
@@ -362,5 +367,5 @@ FROM movies
     INNER JOIN recommended_movieids
     ON movies.movieid = recommended_movieids.movieid_unrated;
 
-SELECT * FROM recommendation;
+-- SELECT * FROM recommendation;
 
