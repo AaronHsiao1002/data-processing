@@ -15,7 +15,7 @@ ORDER BY genreid;
 
 -- get genre names from genreid
 DROP TABLE IF EXISTS query1 CASCADE;
-CREATE TABLE query1 AS
+CREATE TABLE query1 (name, moviecount) AS
 SELECT genres.name, genreid_counts.count
 FROM genres
 INNER JOIN genreid_counts
@@ -184,7 +184,7 @@ INTERSECT
 SELECT movieid
 FROM comedy_movieids;
 
--- get average rating from all movies in comedy_romance_movieids table
+-- get average rating from all movies
 DROP TABLE IF EXISTS query7 CASCADE;
 CREATE TABLE query7 (average) AS
 SELECT avg(rating)
@@ -192,7 +192,7 @@ FROM ratings
     INNER JOIN romance_and_comedy_movieids
     ON ratings.movieid = romance_and_comedy_movieids.movieid;
 
-SELECT * FROM query7;
+-- SELECT * FROM query7;
 
 
 
@@ -204,26 +204,19 @@ is “Romance” but not “Comedy”. Your query result should be saved in a ta
 “query8” which has one attribute: “average”.
 */
 
--- does this mean return the average rating for Romance movies?
--- get romance movieids
-DROP TABLE IF EXISTS romance_movieids CASCADE;
-SELECT hasagenre.movieid, hasagenre.genreid
-INTO romance_movieids
-FROM hasagenre
-WHERE hasagenre.genreid IN
-(
-    SELECT genres.genreid
-    FROM genres
-    WHERE name = 'Romance'
-);
+-- get romance and not comedy movieids
+DROP TABLE IF EXISTS romance_not_comedy_movieids;
+SELECT movieid INTO TEMP romance_not_comedy_movieids
+FROM romance_movieids EXCEPT
+SELECT movieid
+FROM comedy_movieids;
 
 -- join romance movie ids with their average ratings, averge the overall rating
 DROP TABLE IF EXISTS query8 CASCADE;
 CREATE TABLE query8 (average) AS
-SELECT avg(rating_avgs.avg)
-FROM rating_avgs
-    INNER JOIN romance_movieids
-    ON rating_avgs.movieid = romance_movieids.movieid;
+SELECT avg(rating)
+FROM ratings
+INNER JOIN romance_not_comedy_movieids ON ratings.movieid = romance_not_comedy_movieids.movieid;
 
 -- SELECT * FROM query8;
 
@@ -243,7 +236,8 @@ DROP TABLE IF EXISTS query9 CASCADE;
 CREATE TABLE query9 (movieid, rating) AS
 SELECT ratings.movieid, ratings.rating
 FROM ratings
-WHERE ratings.userid = :v1;
+WHERE ratings.userid = :v1
+ORDER BY ratings.movieid;
 
 -- SELECT * FROM query9;
 
@@ -259,106 +253,79 @@ for User Ua. L contains all movies that have been rated by Ua. Sim(i,l) is the s
 between i and l. r is the rating that Ua gave to l.
 */
 
+
+-- get sim score for all possible combinations of movies
+DROP TABLE IF EXISTS rating_avgs_copy;
+CREATE TABLE rating_avgs_copy AS
+TABLE rating_avgs;
+
+DROP TABLE IF EXISTS all_combos_sim;
+CREATE TABLE all_combos_sim (movieid1, movieid2, sim) AS
+SELECT rating_avgs.movieid, rating_avgs_copy.movieid, (1 - (abs(rating_avgs.avg - rating_avgs_copy.avg) / 5))
+FROM rating_avgs
+CROSS JOIN rating_avgs_copy;
+
+-- SELECT * FROM all_combos_sim WHERE movieid1 = 3565 AND movieid2 = 2026;
+
 -- get movieids that user :v1 hasn't rated, store in "unrated"
+
 DROP TABLE IF EXISTS unrated CASCADE;
-SELECT DISTINCT ratings.movieid
-INTO TEMP unrated
-FROM ratings
-WHERE ratings.userid != :v1
-ORDER BY ratings.movieid;
+SELECT movies.movieid INTO TEMP unrated
+FROM movies
+WHERE NOT EXISTS
+        (SELECT
+         FROM query9
+         WHERE query9.movieid = movies.movieid );
 
 
--- join unrated movies with avg rating table
-DROP TABLE IF EXISTS unrated_w_avg CASCADE;
-CREATE TABLE unrated_w_avg(movieid_unrated, average_unrated) AS
-SELECT unrated.movieid, rating_avgs.avg
-FROM unrated
-    INNER JOIN rating_avgs
-    ON rating_avgs.movieid = unrated.movieid;
+-- SELECT * FROM unrated;
 
+-- filter movieid1 column based on what the user hasn't rated
+DROP TABLE IF EXISTS unrated_combos_sim;
+CREATE TABLE unrated_combos_sim (unrated_movieid, movieid2, sim) AS
+SELECT unrated.movieid, all_combos_sim.movieid2, sim
+FROM all_combos_sim
+    INNER JOIN unrated
+    ON unrated.movieid = all_combos_sim.movieid1;
 
--- join user rated movies with avg rating table
-DROP TABLE IF EXISTS rated_w_avg CASCADE;
-CREATE TABLE rated_w_avg(movieid_rated, average_rated) AS
-SELECT query9.movieid, rating_avgs.avg
-FROM query9
-    INNER JOIN rating_avgs
-    ON rating_avgs.movieid = query9.movieid;
-
-
--- perform cartesian product join (cross join) between the two sets
-DROP TABLE IF EXISTS combinations CASCADE;
-CREATE TABLE combinations
-(
-    movieid_unrated INT,
-    avg_rating_unrated NUMERIC,
-    movieid_rated INT,
-    avg_rating_rated NUMERIC,
-    similarity NUMERIC GENERATED ALWAYS AS (1 - (abs(avg_rating_unrated - avg_rating_rated) / 5)) STORED
-);
-
-INSERT INTO combinations
-SELECT unrated_w_avg.movieid_unrated,
-        unrated_w_avg.average_unrated,
-        rated_w_avg.movieid_rated,
-        rated_w_avg.average_rated
-FROM unrated_w_avg
-    CROSS JOIN rated_w_avg
-ORDER BY rated_w_avg.movieid_rated;
-
--- SELECT * FROM combinations;
-
--- create sum of all unrated movies' (I) similarity scores with all user rated movies (L)
-
--- join combinations with user ratings
-DROP TABLE IF EXISTS user_ratings CASCADE;
-CREATE TABLE user_ratings
-(
-    movieid_unrated INT,
-    avg_rating_unrated NUMERIC,
-    movieid_rated INT,
-    avg_rating_rated NUMERIC,
-    similarity NUMERIC,
-    user_rating NUMERIC
-);
-INSERT INTO user_ratings
-SELECT combinations.movieid_unrated,
-        combinations.avg_rating_unrated,
-        combinations.movieid_rated,
-        combinations.avg_rating_rated,
-        combinations.similarity,
-        query9.rating
-FROM combinations
+-- filter movieid2 column based on what the user has rated, include their rating
+DROP TABLE IF EXISTS unrated_rated_combos;
+CREATE TABLE unrated_rated_combos (unrated_movieid, rated_movieid, sim, user_rating) AS
+SELECT unrated_combos_sim.unrated_movieid, query9.movieid, unrated_combos_sim.sim, query9.rating
+FROM unrated_combos_sim
     INNER JOIN query9
-    ON query9.movieid = combinations.movieid_rated;
+    ON query9.movieid = unrated_combos_sim.movieid2;
 
--- SELECT * FROM user_ratings;
+-- SELECT * FROM unrated_rated_combos;
 
-
-
-DROP TABLE IF EXISTS sim_sums CASCADE;
-CREATE TABLE sim_sums (
+-- calculate recommended score based on columns
+DROP TABLE IF EXISTS rec_scores CASCADE;
+CREATE TABLE rec_scores (
     movieid_unrated INT,
     numerator NUMERIC,
     sim_sum NUMERIC,
-    recommendation_score NUMERIC GENERATED ALWAYS AS (numerator / sim_sum) STORED
+    rec_score NUMERIC GENERATED ALWAYS AS (numerator / sim_sum) STORED
 );
 
-INSERT INTO sim_sums
-SELECT user_ratings.movieid_unrated, sum(user_ratings.similarity * user_ratings.user_rating), sum(user_ratings.similarity)
-FROM user_ratings
-GROUP BY user_ratings.movieid_unrated;
+INSERT INTO rec_scores
+SELECT
+    unrated_rated_combos.unrated_movieid,
+    sum(unrated_rated_combos.sim * unrated_rated_combos.user_rating),
+    sum(unrated_rated_combos.sim)
+FROM unrated_rated_combos
+GROUP BY unrated_rated_combos.unrated_movieid;
 
--- SELECT * FROM sim_sums;
+-- SELECT * FROM rec_scores;
 
 -- join movieids with movie titles where rating where rating > 3.9
 DROP TABLE IF EXISTS recommended_movieids CASCADE;
-SELECT sim_sums.movieid_unrated, sim_sums.recommendation_score
+SELECT rec_scores.movieid_unrated, rec_scores.rec_score
 INTO TEMP recommended_movieids
-FROM sim_sums
-WHERE sim_sums.recommendation_score > 3.9;
+FROM rec_scores
+WHERE rec_scores.rec_score > 3.9
+ORDER BY rec_scores.movieid_unrated;
 
--- SELECT * FROM recommended_movieids;
+--SELECT * FROM recommended_movieids;
 
 DROP TABLE IF EXISTS recommendation CASCADE;
 CREATE TABLE recommendation (title) AS
@@ -367,5 +334,5 @@ FROM movies
     INNER JOIN recommended_movieids
     ON movies.movieid = recommended_movieids.movieid_unrated;
 
--- SELECT * FROM recommendation;
+-- SELECT count(*) FROM recommendation;
 
