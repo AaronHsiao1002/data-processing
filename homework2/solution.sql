@@ -334,5 +334,5 @@ FROM movies
     INNER JOIN recommended_movieids
     ON movies.movieid = recommended_movieids.movieid_unrated;
 
--- SELECT count(*) FROM recommendation;
+SELECT count(*) FROM recommendation;
 
