@@ -29,7 +29,7 @@ def loadRatings(ratingstablename, ratingsfilepath, openconnection):
     )
 
     # load data
-    with open('test_data.txt', 'r') as data:
+    with open(ratingsfilepath, 'r') as data:
         cur.copy_from(data, 'Ratings', sep=':')
 
     cur.execute(
