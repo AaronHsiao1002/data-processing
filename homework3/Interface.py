@@ -110,10 +110,10 @@ def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
         # create table for each partition
         for partition_idx in range(numberofpartitions):
             # create table for fragment
-            cur.execute("DROP TABLE IF EXISTS range_part{}".format(partition_idx))
+            cur.execute("DROP TABLE IF EXISTS rrobin_part{}".format(partition_idx))
             cur.execute(
                 """
-                CREATE TABLE range_part{} (
+                CREATE TABLE rrobin_part{} (
                     UserID int,
                     MovieID int,
                     Rating float,
@@ -125,10 +125,10 @@ def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
         # iterate each table row and insert into rotating table number
         cur.execute("SELECT * FROM {}".format(ratingstablename))
         temp_table = cur.fetchall()
-        for row in temp_table:
-            partition_idx = row % numberofpartitions
-            cur.execute("INSERT INTO range_part{}(UserID, MovieID, Rating) VALUES ({},{},{})"
-                .format(partition_idx, row[0], row[1], row[2]))
+        for row_num, row_data in enumerate(temp_table):
+            partition_idx = row_num % numberofpartitions
+            cur.execute("INSERT INTO rrobin_part{}(UserID, MovieID, Rating) VALUES ({},{},{})"
+                .format(partition_idx, row_data[0], row_data[1], row_data[2]))
 
 
 def roundrobininsert(ratingstablename, userid, itemid, rating, openconnection):
