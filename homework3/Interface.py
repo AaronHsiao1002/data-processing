@@ -48,6 +48,18 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
 
     with openconnection.cursor() as cur:
 
+        """
+        # create metatable for partition data
+        cur.execute("DROP TABLE IF EXISTS range_partition_meta")
+        cur.execute(
+            CREATE TABLE range_partition_meta (
+                partition_idx int,
+                start_rating float,
+                end_rating float,
+                PRIMARY KEY (partition_idx)
+            )
+        )
+        """
         partition_size = 5 / numberofpartitions
         # partition by row and insert into separate fragment
         start_rating = 0
@@ -55,6 +67,8 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
 
             # query partition data
             end_rating = start_rating + partition_size
+
+            # update partition metadata table
             if table_num == 0:
                 cur.execute(
                     "SELECT * FROM {} WHERE {}.Rating >= {} AND {}.Rating <= {} ORDER BY Rating ASC"
@@ -65,6 +79,7 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
                     "SELECT * FROM {} WHERE {}.Rating > {} AND {}.Rating <= {} ORDER BY Rating ASC"
                     .format(ratingstablename, ratingstablename, start_rating, ratingstablename, end_rating)
                 )
+
             start_rating = end_rating
 
             # save queried data into temp table
@@ -90,7 +105,30 @@ def rangePartition(ratingstablename, numberofpartitions, openconnection):
 
 
 def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
-    pass
+
+    with openconnection.cursor() as cur:
+        # create table for each partition
+        for partition_idx in range(numberofpartitions):
+            # create table for fragment
+            cur.execute("DROP TABLE IF EXISTS range_part{}".format(partition_idx))
+            cur.execute(
+                """
+                CREATE TABLE range_part{} (
+                    UserID int,
+                    MovieID int,
+                    Rating float,
+                    PRIMARY KEY (UserID, MovieID)
+                )
+                """.format(partition_idx)
+            )
+
+        # iterate each table row and insert into rotating table number
+        cur.execute("SELECT * FROM {}".format(ratingstablename))
+        temp_table = cur.fetchall()
+        for row in temp_table:
+            partition_idx = row % numberofpartitions
+            cur.execute("INSERT INTO range_part{}(UserID, MovieID, Rating) VALUES ({},{},{})"
+                .format(partition_idx, row[0], row[1], row[2]))
 
 
 def roundrobininsert(ratingstablename, userid, itemid, rating, openconnection):
@@ -98,7 +136,29 @@ def roundrobininsert(ratingstablename, userid, itemid, rating, openconnection):
 
 
 def rangeinsert(ratingstablename, userid, itemid, rating, openconnection):
-    pass
+
+    with openconnection.cursor() as cur:
+
+        # determine which table to insert, save as partition_idx
+        # iterate each table
+        cur.execute(
+            """
+            SELECT COUNT(table_name)
+            FROM information_schema.tables
+            WHERE table_name LIKE 'range_part%' AND table_schema not in ('information_schema', 'pg_catalog')
+            and table_type = 'BASE TABLE'
+            """
+        )
+
+        num_partitions = int(cur.fetchall()[0][0])
+        partition_size = 5 / num_partitions
+        partition_idx = rating / partition_size
+        if rating % partition_size == 0 and partition_idx != 0:
+            partition_idx -= 1
+
+        # insert
+        cur.execute("INSERT INTO range_part{}(UserID, MovieID, Rating) VALUES ({},{},{})"
+                    .format(partition_idx, userid, itemid, rating))
 
 def createDB(dbname='dds_assignment'):
     """
