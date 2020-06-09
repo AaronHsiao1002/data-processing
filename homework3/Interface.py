@@ -45,7 +45,48 @@ def loadRatings(ratingstablename, ratingsfilepath, openconnection):
 
 
 def rangePartition(ratingstablename, numberofpartitions, openconnection):
-    pass
+
+    with openconnection.cursor() as cur:
+
+        partition_size = 5 / numberofpartitions
+        # partition by row and insert into separate fragment
+        start_rating = 0
+        for table_num in range(numberofpartitions):
+
+            # query partition data
+            end_rating = start_rating + partition_size
+            if table_num == 0:
+                cur.execute(
+                    "SELECT * FROM {} WHERE {}.Rating >= {} AND {}.Rating <= {} ORDER BY Rating ASC"
+                    .format(ratingstablename, ratingstablename, start_rating, ratingstablename, end_rating)
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM {} WHERE {}.Rating > {} AND {}.Rating <= {} ORDER BY Rating ASC"
+                    .format(ratingstablename, ratingstablename, start_rating, ratingstablename, end_rating)
+                )
+            start_rating = end_rating
+
+            # save queried data into temp table
+            temp_table = cur.fetchall()
+
+            # create table for fragment
+            cur.execute("DROP TABLE IF EXISTS range_part{}".format(table_num))
+            cur.execute(
+                """
+                CREATE TABLE range_part{} (
+                    UserID int,
+                    MovieID int,
+                    Rating float,
+                    PRIMARY KEY (UserID, MovieID)
+                )
+                """.format(table_num)
+            )
+
+            # load temp table into created table fragment
+            for row in temp_table:
+                cur.execute("INSERT INTO range_part{}(UserID, MovieID, Rating) VALUES ({},{},{})"
+                .format(table_num, row[0], row[1], row[2]))
 
 
 def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
