@@ -132,7 +132,46 @@ def roundRobinPartition(ratingstablename, numberofpartitions, openconnection):
 
 
 def roundrobininsert(ratingstablename, userid, itemid, rating, openconnection):
-    pass
+    with openconnection.cursor() as cur:
+        # get
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_name LIKE 'rrobin_part%' AND table_schema not in ('information_schema', 'pg_catalog')
+            and table_type = 'BASE TABLE'
+            """
+        )
+        num_partitions = int(cur.fetchall()[0][0])
+
+        # get minimally sized partition
+        cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM rrobin_part0
+                """
+            )
+        min_partition = int(cur.fetchall()[0][0])
+        min_partition_idx = 0
+        for partition_idx in range(1, num_partitions):
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM rrobin_part{}
+                """.format(partition_idx)
+            )
+            num_rows = int(cur.fetchall()[0][0])
+            if num_rows < min_partition:
+                min_partition = num_rows
+                min_partition_idx = partition_idx
+
+        # insert into minimally sized row
+        cur.execute("INSERT INTO rrobin_part{}(UserID, MovieID, Rating) VALUES ({},{},{})"
+                .format(min_partition_idx, userid, itemid, rating))
+
+
+
+
 
 
 def rangeinsert(ratingstablename, userid, itemid, rating, openconnection):
