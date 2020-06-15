@@ -48,10 +48,8 @@ def RangeQuery(ratingsTableName, ratingMinValue, ratingMaxValue, openconnection)
     )
 
     part_names = cur.fetchall()
-    print(part_names)
     for part_name in part_names:
         part_name = part_name[0]
-        print("Querying: ", part_name)
         cur.execute(
             "SELECT * FROM %s WHERE Rating BETWEEN %s AND %s "
             % (part_name, ratingMinValue, ratingMaxValue)
@@ -66,7 +64,47 @@ def RangeQuery(ratingsTableName, ratingMinValue, ratingMaxValue, openconnection)
 
 
 def PointQuery(ratingsTableName, ratingValue, openconnection):
-    pass
+    cur = openconnection.cursor()
+
+    """ GET RANGE PARTITION TUPLES """
+    # get partition numbers that include rows in the rating range of the passed parameters
+    cur.execute(
+        "SELECT PartitionNum FROM %s WHERE %s BETWEEN MinRating AND MaxRating"
+        % (RANGE_METADATA_TABLE, ratingValue)
+    )
+    partitions = cur.fetchall()
+
+    rows = []
+    # get tuples/rows from selected partitions
+    for part in partitions:
+        part_name = RANGE_TABLE_PREFIX + str(part[0])
+        cur.execute(
+            "SELECT * FROM %s WHERE Rating = %s"
+            % (part_name, ratingValue)
+        )
+
+        tuples = cur.fetchall()
+        for row in tuples:
+            rows.append([part_name] + list(row))
+
+    """ GET ROUND ROBIN PARTITION TUPLES """
+    cur.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'roundrobinratingspart%'"
+    )
+
+    part_names = cur.fetchall()
+    for part_name in part_names:
+        part_name = part_name[0]
+        cur.execute(
+            "SELECT * FROM %s WHERE Rating = %s "
+            % (part_name, ratingValue)
+        )
+        tuples = cur.fetchall()
+        for row in tuples:
+            rows.append([part_name] + list(row))
+
+    # write tuples/rows
+    writeToFile("PointQueryOut.txt", rows)
 
 
 def writeToFile(filename, rows):
