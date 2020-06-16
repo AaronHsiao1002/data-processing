@@ -32,9 +32,19 @@ def ParallelSort (InputTable, SortingColumnName, OutputTable, openconnection):
 
 
 def ParallelJoin (InputTable1, InputTable2, Table1JoinColumn, Table2JoinColumn, OutputTable, openconnection):
-    #Implement ParallelJoin Here.
-    pass # Remove this once you are done with implementation
+    cur = openconnection.cursor()
 
+    # create new table
+    cur.execute(
+        """
+        CREATE TABLE %s AS
+        SELECT *
+        FROM %s
+            INNER JOIN %s
+            ON %s.%s = %s.%s
+        """
+        % (OutputTable, InputTable1, InputTable2, InputTable1, Table1JoinColumn, InputTable2, Table2JoinColumn)
+    )
 
 ################### DO NOT CHANGE ANYTHING BELOW THIS #############################
 
